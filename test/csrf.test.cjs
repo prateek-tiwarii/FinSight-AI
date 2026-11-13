@@ -50,8 +50,9 @@ test("guest session waits for the credentialed CSRF priming GET", async () => {
   const calls = [];
   globalThis.fetch = async (url, init) => {
     calls.push({ url, init });
-    if (url.endsWith("/api/auth/me")) setCookie("finsight_csrf=primed-token");
-    return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    const headers = { "content-type": "application/json" };
+    if (url.endsWith("/api/auth/me")) headers["X-CSRF-Token"] = "primed-token";
+    return new Response("{}", { status: 200, headers });
   };
   const { continueAsGuest } = loadApi();
 
@@ -63,6 +64,7 @@ test("guest session waits for the credentialed CSRF priming GET", async () => {
   assert.match(calls[1].url, /\/api\/guest\/session$/);
   assert.equal(calls[1].init.credentials, "include");
   assert.equal(new Headers(calls[1].init.headers).get("X-CSRF-Token"), "primed-token");
+  assert.equal(globalThis.document.cookie, "");
 });
 
 test("apiFetch does not send an unsafe request when priming does not set a cookie", async () => {

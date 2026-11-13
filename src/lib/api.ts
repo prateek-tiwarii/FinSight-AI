@@ -34,6 +34,7 @@ const COOKIE_PREFIX = process.env.NEXT_PUBLIC_COOKIE_PREFIX || "finsight";
 const CSRF_COOKIE = `${COOKIE_PREFIX}_csrf`;
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS", "TRACE"]);
 let csrfInitialization: Promise<string> | null = null;
+let csrfTokenMemory: string | null = null;
 
 function readCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
@@ -52,12 +53,15 @@ export function getCsrfToken(): string | null {
 export async function initializeCsrfToken(): Promise<string> {
   const existing = getCsrfToken();
   if (existing) return existing;
+  if (csrfTokenMemory) return csrfTokenMemory;
   if (!csrfInitialization) {
-    // The backend issues the readable CSRF cookie on the first API GET.
+    // The response header supports deployments where the API cookie is not
+    // readable to JavaScript on the separate frontend origin.
     csrfInitialization = (async () => {
-      await fetch(`${BASE_URL}/api/auth/me`, { credentials: "include", cache: "no-store" });
-      const token = getCsrfToken();
-      if (!token) throw new Error("CSRF initialization failed: token cookie was not set");
+      const response = await fetch(`${BASE_URL}/api/auth/me`, { credentials: "include", cache: "no-store" });
+      const token = response.headers.get("X-CSRF-Token") || getCsrfToken();
+      if (!token) throw new Error("CSRF initialization failed: token was unavailable");
+      csrfTokenMemory = token;
       return token;
     })().finally(() => {
       csrfInitialization = null;
