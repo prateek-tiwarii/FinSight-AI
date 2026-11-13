@@ -33,6 +33,7 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"
 const COOKIE_PREFIX = process.env.NEXT_PUBLIC_COOKIE_PREFIX || "finsight";
 const CSRF_COOKIE = `${COOKIE_PREFIX}_csrf`;
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS", "TRACE"]);
+let csrfInitialization: Promise<string> | null = null;
 
 function readCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
@@ -48,12 +49,21 @@ export function getCsrfToken(): string | null {
   return readCookie(CSRF_COOKIE);
 }
 
-async function ensureCsrfToken(): Promise<string | null> {
+export async function initializeCsrfToken(): Promise<string> {
   const existing = getCsrfToken();
   if (existing) return existing;
-  // The backend issues the readable CSRF cookie on the first API GET.
-  await fetch(`${BASE_URL}/api/auth/me`, { credentials: "include", cache: "no-store" }).catch(() => null);
-  return getCsrfToken();
+  if (!csrfInitialization) {
+    // The backend issues the readable CSRF cookie on the first API GET.
+    csrfInitialization = (async () => {
+      await fetch(`${BASE_URL}/api/auth/me`, { credentials: "include", cache: "no-store" });
+      const token = getCsrfToken();
+      if (!token) throw new Error("CSRF initialization failed: token cookie was not set");
+      return token;
+    })().finally(() => {
+      csrfInitialization = null;
+    });
+  }
+  return csrfInitialization;
 }
 
 async function handleResponse<T>(res: Response): Promise<T> {
@@ -81,8 +91,8 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   const method = (init.method || "GET").toUpperCase();
   const headers = new Headers(init.headers);
   if (!SAFE_METHODS.has(method)) {
-    const token = await ensureCsrfToken();
-    if (token) headers.set("X-CSRF-Token", token);
+    const token = await initializeCsrfToken();
+    headers.set("X-CSRF-Token", token);
   }
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
